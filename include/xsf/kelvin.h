@@ -29,6 +29,7 @@ namespace detail {
         const T pi = 3.141592653589793;
         const T el = 0.5772156649015329;
         const T eps = 1.0e-15;
+        const T ln2 = 0.6931471805599453;
 
         if (x == 0.0) {
             *ber = 1.0;
@@ -42,10 +43,34 @@ namespace detail {
             return;
         }
 
+        if (std::isinf(x)) {
+            // ker, kei and their derivatives decay to zero, as k0 and k1 do, and
+            // xsf::cephes::k0(inf) already returns 0. ber and bei oscillate with
+            // unbounded amplitude, so they have no limit and stay NaN.
+            *ber = std::numeric_limits<T>::quiet_NaN();
+            *bei = std::numeric_limits<T>::quiet_NaN();
+            *ger = 0.0;
+            *gei = 0.0;
+            *der = std::numeric_limits<T>::quiet_NaN();
+            *dei = std::numeric_limits<T>::quiet_NaN();
+            *her = 0.0;
+            *hei = 0.0;
+            return;
+        }
+
         x2 = 0.25 * x * x;
         x4 = x2 * x2;
 
         if (fabs(x) < 10.0) {
+            // For subnormal x, forming x/2 loses a bit and underflows to zero at the
+            // smallest subnormal, making log(x/2) equal -inf; the ker/kei terms then
+            // multiply that by a ber/bei that has itself underflowed, giving
+            // inf*0 = NaN. Subtracting log(2) is the same value and never forms x/2.
+            // Restricted to the subnormal range so that no normal input changes: ker
+            // and kei are built by cancelling exponentially large terms, so even a
+            // one-ulp perturbation here is amplified by |ber|/|ker|.
+            T lnx2 = (fabs(x) >= std::numeric_limits<T>::min()) ? log(x / 2.0) : log(x) - ln2;
+
             *ber = 1.0;
             r = 1.0;
             for (m = 1; m <= 60; m++) {
@@ -66,7 +91,7 @@ namespace detail {
                 }
             }
 
-            *ger = -(log(x / 2.0) + el) * (*ber) + 0.25 * pi * (*bei);
+            *ger = -(lnx2 + el) * (*ber) + 0.25 * pi * (*bei);
 
             r = 1.0;
             gs = 0.0;
@@ -79,7 +104,7 @@ namespace detail {
                 }
             }
 
-            *gei = x2 - (log(x / 2.0) + el) * (*bei) - 0.25 * pi * (*ber);
+            *gei = x2 - (lnx2 + el) * (*bei) - 0.25 * pi * (*ber);
 
             r = x2;
             gs = 1.0;
@@ -114,7 +139,7 @@ namespace detail {
 
             r = -0.25 * x * x2;
             gs = 1.5;
-            *her = 1.5 * r - (*ber) / x - (log(x / 2.0) + el) * (*der) + 0.25 * pi * (*dei);
+            *her = 1.5 * r - (*ber) / x - (lnx2 + el) * (*der) + 0.25 * pi * (*dei);
             for (m = 1; m <= 60; m++) {
                 r = -0.25 * r / m / (m + 1.0) / pow((2.0 * m + 1.0), 2) * x4;
                 gs = gs + 1.0 / (2.0 * m + 1.0) + 1.0 / (2 * m + 2.0);
@@ -126,7 +151,7 @@ namespace detail {
 
             r = 0.5 * x;
             gs = 1.0;
-            *hei = 0.5 * x - (*bei) / x - (log(x / 2.0) + el) * (*dei) - 0.25 * pi * (*der);
+            *hei = 0.5 * x - (*bei) / x - (lnx2 + el) * (*dei) - 0.25 * pi * (*der);
             for (m = 1; m <= 60; m++) {
                 r = -0.25 * r / (m * m) / (2 * m - 1.0) / (2 * m + 1.0) * x4;
                 gs = gs + 1.0 / (2.0 * m) + 1.0 / (2 * m + 1.0);
